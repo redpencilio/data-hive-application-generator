@@ -31,7 +31,9 @@
 
 ;;; run the program
 (eval (read-from-string "(ql:quickload :resources-generator)"))
-(format t "~& >> Ember generate commands ~%")
+(format t "~& >> Ember generate commands for resources ~%")
 (eval (read-from-string "(resources-generator:generate-resources)"))
+(format t "~& >> Ember generate command for prefixes ~%")
+(eval (read-from-string "(resources-generator:generate-prefixes)"))
 (format t "~& >> dispatcher.ex rules ~%")
 (eval (read-from-string "(resources-generator:generate-dispatchers)"))

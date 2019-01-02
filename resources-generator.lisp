@@ -10,6 +10,12 @@
   (format t "~{~A~^ ~%~}"
           (mapcar #'generate-dispatcher (all-resources))))
 
+(defun generate-prefixes ()
+  "Returns an array containing all embedded prefixes"
+  (format t "ember generate rdfa-prefixes \"~A\" ~{\"~{~A:~A\"~}~,^ ~}"
+          "http://schema.org/"
+          (loop for (prefix . uri) in (cl-fuseki:get-prefix-alist)
+                collect `(,prefix ,uri))))
 
 (defun all-resources ()
   "Fetch all resources from domain.lisp"
@@ -18,49 +24,63 @@
      collect val))
 
 
-
-
 (defun generate-resource (resource)
   "Generate a string with an eg command for one resource"
-  (format nil "~A ~A ~{~A ~}~:{~A:belongs-to:~A~#[~;~~~A~] ~}~:{~A:has-many:~A~#[~;~~~A~] ~} ~[~;--readonly~]"
+  (format nil "~A \"~A&~A\" ~{~A ~}~A~A ~[~;--readonly~]"
           "ember g mu-resource" ; terminal command
           (gen-resource-name resource)  ; resource name
+          (mu-cl-resources::ld-class resource) ; resource type
           (mapcar #'gen-resource-slot (mu-cl-resources::ld-properties resource)) ; its attributes
-          (mapcar #'(lambda (l) (gen-resource-rel l resource)) (mu-cl-resources::has-one-links  resource)) ; its belongs-to relations
-          (mapcar #'(lambda (l) (gen-resource-rel l resource)) (mu-cl-resources::has-many-links resource)) ; its has-many relations
-          (readonly) ; sets readonly flag for ever eg command if readonly env is set
-          ))
+          (gen-resource-has-one-links resource)
+          (gen-resource-has-many-links resource)
+          (readonly))) ; sets readonly flag for ever eg command if readonly env is set
+
+
+(defun gen-resource-has-one-links (resource)
+  (format nil "~{~A ~}"
+          (loop for link in (mu-cl-resources::has-one-links resource)
+             for resource-rel = (gen-resource-rel link resource)
+             for property = (and (not (mu-cl-resources::inverse-p link))
+                               (mu-cl-resources::ld-link link))
+             collect
+               (format nil "\"~{~A:belongs-to:~A~#[~;~~~A~]~}~@[&~A~]\""
+                       resource-rel property))))
+
+(defun gen-resource-has-many-links (resource)
+  (format nil "~{~A ~}"
+          (loop for link in (mu-cl-resources::has-many-links resource)
+             for resource-rel = (gen-resource-rel link resource)
+             for property = (and (not (mu-cl-resources::inverse-p link))
+                               (mu-cl-resources::ld-link link))
+             collect
+               (format nil "\"~{~A:has-many:~A~#[~;~~~A~]~}~@[&~A~]\""
+                       resource-rel property))))
 
 (defun gen-resource-name (resource)
   (string-downcase (mu-cl-resources::resource-name resource)))
 
 (defun gen-resource-slot (property)
-  (format nil "~A:~A"
+  (format nil "\"~A:~A&~A\""
           (string-downcase (symbol-name (mu-cl-resources::json-key property)))
-          (string-downcase (symbol-name (mu-cl-resources::resource-type property)))))
+          (string-downcase (symbol-name (mu-cl-resources::resource-type property)))
+          (mu-cl-resources::ld-property property)))
 
 (defun gen-resource-rel (link resource)
-  (let ((i (find-inverse link resource)))
-        (if i
-            `(,(mu-cl-resources::request-path link) ,(string-downcase (mu-cl-resources::resource-name link)) ,i)
-            `(,(mu-cl-resources::request-path link) ,(string-downcase (mu-cl-resources::resource-name link)))
-        )
-  )
-)
+  (let ((inverse-link (find-inverse link resource)))
+    (if inverse-link
+        `(,(mu-cl-resources::request-path link) ,(string-downcase (mu-cl-resources::resource-name link)) ,inverse-link)
+        `(,(mu-cl-resources::request-path link) ,(string-downcase (mu-cl-resources::resource-name link))))))
 
 (defun find-inverse (link resource)
   ;; NOTE: this method contains a workaround, as muclr:1.15.0 doesn't check whether
   ;;       inverse relations on a predicate actually point to each other.
-  (let ((i (mu-cl-resources::inverse-links link)))
-        (when (and
-                i ; an inverse predicate exists
-                (equalp ; and the relations on the predicate point to each other
-                  (mu-cl-resources::resource-name link)
-                  (mu-cl-resources::resource-name (getf (car i) :resource))))
-            (string-downcase (mu-cl-resources::request-path (getf (car i) :link)))
-        )
-  )
-)
+  (let ((inverse-links (mu-cl-resources::inverse-links link)))
+    (when (and
+           inverse-links ; an inverse predicate exists
+           (equalp ; and the relations on the predicate point to each other
+            (mu-cl-resources::resource-name link)
+            (mu-cl-resources::resource-name (getf (car inverse-links) :resource))))
+      (string-downcase (mu-cl-resources::request-path (getf (car inverse-links) :link))))))
 
 (defun readonly ()
   (if (env-value :readonly) 1 0))
@@ -70,13 +90,12 @@
   (sb-ext:posix-getenv (string-upcase (string setting))))
 
 
-; Generate a string with a dispatcher rule for one resource
+;; Generate a string with a dispatcher rule for one resource
 (defun generate-dispatcher (resource)
   "Returns the dispatcher rule for the specific resource"
   (let ((path (string-downcase (mu-cl-resources::request-path resource))))
-      (format nil "  match \"/~A/*path\" do~%    Proxy.forward conn, path, \"http://resource/~A/\"~%  end"
-          path
-          path
-      )
-  )
-)
+    (format nil "  match \"/~A/*path\" do~%    Proxy.forward conn, path, \"http://resource/~A/\"~%  end"
+            path
+            path)))
+
+

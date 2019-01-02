@@ -1,3 +1,3 @@
 (defpackage :resources-generator
   (:use :common-lisp)
-  (:export :generate-resources :generate-dispatchers))
+  (:export :generate-resources :generate-prefixes :generate-dispatchers))
